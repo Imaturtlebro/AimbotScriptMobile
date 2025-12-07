@@ -1,16 +1,16 @@
 --[[
     Script: Aimbot (Camera Lock & Silent Aim) - Merged & Fixed
-    Version: 3.0
-    Author: Merged by AI
+    Version: 3.1
+    Author: Merged by AI, Fixed by Developer
     
-    Changes:
-    - Merged features from both provided scripts into a single, cohesive version.
-    - FIXED: Silent Aim hook is no longer generic. It now requires a specific remote name to avoid breaking game functions like shooting.
-    - FIXED: Tracer line now originates from the mouse cursor for a more intuitive visual, instead of the bottom of the screen.
-    - ADDED: Silent Aim and Show Tracer toggles from the new script.
-    - ADDED: Robust executor feature checks (syn, gethui, Drawing, getnamecallmethod).
-    - ADDED: GUI creation is wrapped in a pcall for stability.
-    - RE-INTEGRATED: The "KillCheck" feature from the original script is now a functional toggle.
+    Changes
+   
+    - FIXED: Silent Aim vector calculation. The script now sends a proper direction vector instead of a world position,
+             resolving the issue where shots would go above the target's head.
+    - FIXED: The "KillCheck" feature was logically broken and would disable the aimbot. It now correctly functions as a
+             health check, ensuring the aimbot only targets live players. It is now enabled by default.
+    - IMPROVED: Added extensive, clear instructions within the silent aim hook on how to find and set the correct
+                remote event name, which is required to make silent aim function.
     - IMPROVED: Overall code structure, readability, and reliability.
 ]]
 
@@ -33,7 +33,7 @@ local Settings = {
     ShowTracer = false,
     FOV = 80,
     TeamCheck = false,
-    KillCheck = false, -- Re-added from original
+    KillCheck = true, -- FIXED: Enabled by default. This ensures the aimbot only targets living players.
     WallCheck = false,
     TargetPart = "Head"
 }
@@ -267,6 +267,11 @@ end
 --// CONNECTIONS
 -- Helper function for setting up toggle button logic
 local function setupToggleButton(button, settingKey, textPrefix)
+    -- Set initial state from Settings table
+    local initialStatus = Settings[settingKey] and "ON" or "OFF"
+    button.Text = textPrefix .. ": " .. initialStatus
+    button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
+    
     button.MouseButton1Click:Connect(function()
         if settingKey == "SilentAim" and not namecallSupported then
             button.Text = "Silent: Unsupported"
@@ -338,13 +343,20 @@ end)
 
 --// AIMBOT CORE LOGIC
 local function isAlive(player)
-    if Settings.KillCheck then
-        return false -- If KillCheck is on, we consider everyone "dead" so we don't target them.
-    end
+    -- FIXED: This function now correctly checks the player's health if the setting is enabled.
     local character = player.Character
     if not character then return false end
+    
     local humanoid = character:FindFirstChildOfClass("Humanoid")
-    return humanoid and humanoid.Health > 0
+    if not humanoid then return false end
+    
+    -- If KillCheck is enabled, we only target players with health greater than 0.
+    if Settings.KillCheck then
+        return humanoid.Health > 0
+    end
+    
+    -- If KillCheck is disabled, we consider any character with a humanoid a valid target.
+    return true
 end
 
 local function isTeammate(player)
@@ -362,7 +374,6 @@ local function isVisible(targetPart)
     rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     local result = Workspace:Raycast(origin, direction, rayParams)
     
-    -- If the ray hits nothing, or it hits something that is part of the target's character, they are visible.
     return not result or result.Instance:IsDescendantOf(targetPart.Parent)
 end
 
@@ -404,7 +415,6 @@ RunService.RenderStepped:Connect(function()
         if Settings.ShowTracer then
             local targetScreenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
             if onScreen then
-                -- FIXED: Originates from mouse for a more natural feel
                 TracerLine.From = UserInputService:GetMouseLocation()
                 TracerLine.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
                 TracerLine.Visible = true
@@ -429,40 +439,47 @@ end)
 --// SILENT AIM NAMECASE HOOK
 if namecallSupported and old_namecall then
     setnamecallmethod(function(self, ...)
-        -- This function is now much more specific to prevent breaking your game.
-        
         local method = getnamecallmethod()
         local args = {...}
         
-        -- !! IMPORTANT !!
-        -- The line below is the KEY to fixing the "can't shoot" issue.
-        -- The old script checked for ANY RemoteEvent, which broke shooting, movement, etc.
-        -- You must replace "YourFireRemoteNameHere" with the actual name of the remote event
-        -- that your game's gun uses to fire.
-        --
-        -- How to find the name:
-        -- 1. Use an executor tool like RemoteSpy or SimpleSpy.
-        -- 2. Fire your gun and look for a remote event that is called.
-        -- 3. Common names include: "Fire", "Update", "Ray", "FireBullet", "Damage".
-        -- 4. Once you find it, put its exact name in the quotes below.
-        --
-        -- EXAMPLE: if the remote is named "FireBullet", the line should be:
-        -- if Settings.Enabled and Settings.SilentAim and self.Name == "FireBullet" then
+        --[[
+            !!! CRITICAL STEP FOR SILENT AIM !!!
+            For silent aim to work, you MUST replace "YourFireRemoteNameHere" below
+            with the actual name of the remote event your weapon uses to fire.
+
+            HOW TO FIND THE REMOTE NAME:
+            1. Use a tool like RemoteSpy or SimpleSpy (included with many executors).
+            2. Shoot your weapon once.
+            3. Look at the spy tool's output for a remote event being fired to the server.
+            4. Common names are "Fire", "Damage", "UpdateMouse", "HandleInput", "Cast", "FireBullet".
+            5. Replace "YourFireRemoteNameHere" with the exact, case-sensitive name you found.
+            
+            EXAMPLE: If the remote is named "FireBullet", the line should be:
+            if Settings.Enabled and Settings.SilentAim and self.Name == "FireBullet" and target then
+        ]]
         
-        if Settings.Enabled and Settings.SilentAim and self.Name == "YourFireRemoteNameHere" then
-            local target = getClosestPlayer()
-            if target and target.Character then
+        local target = getClosestPlayer()
+
+        if Settings.Enabled and Settings.SilentAim and self.Name == "YourFireRemoteNameHere" and target then
+            if target.Character then
                 local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- This loop finds the first directional vector or CFrame in the arguments and replaces it.
-                    -- Some games might use the 2nd argument (args[2]), 3rd (args[3]), etc.
-                    -- You may need to adjust this if it doesn't work.
+                    -- This loop finds the first directional vector (Vector3) or CFrame in the remote's arguments and replaces it.
+                    -- For most games, this works fine. If it doesn't, you may need to target a specific argument like args[2] or args[3].
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" then
-                            args[i] = targetPart.Position
-                            break -- Stop after replacing one to prevent breaking things
+                            --[[
+                                AIMING FIX: The old script sent `targetPart.Position`, which is an absolute world coordinate.
+                                Most gun systems expect a DIRECTION vector (e.g., where your mouse is pointing).
+                                By sending a world coordinate instead of a direction, the game interprets the shot angle
+                                incorrectly, causing it to aim high or miss entirely.
+                                This new line calculates the correct direction vector from your camera to the target.
+                            ]]
+                            args[i] = targetPart.Position - Camera.CFrame.Position 
+                            break -- Stop after replacing the first vector to prevent breaking other arguments
                         elseif typeof(v) == "CFrame" then
-                            args[i] = CFrame.new(Camera.CFrame.Position, targetPart.Position) -- Send a CFrame looking at the target
+                            -- This is generally correct, creating a CFrame that originates at the camera and looks at the target.
+                            args[i] = CFrame.new(Camera.CFrame.Position, targetPart.Position)
                             break
                         end
                     end
@@ -470,7 +487,7 @@ if namecallSupported and old_namecall then
             end
         end
         
-        -- This passes the (possibly modified) arguments to the original function, ensuring the game continues to work.
+        -- This passes the original or modified arguments to the game's function, ensuring everything else works.
         return old_namecall(self, unpack(args))
     end)
 end
@@ -478,9 +495,9 @@ end
 
 --// Script Cleanup
 ScreenGui.Destroying:Connect(function()
-    -- This is crucial to prevent errors when the script is destroyed.
+    -- This is crucial to prevent errors when the script is destroyed or re-executed.
     if namecallSupported and old_namecall then
-        setnamecallmethod(old_namecall) -- Restore the original namecall function
+        setnamecallmethod(old_namecall) -- Restore the original namecall function to prevent breaking game functions.
     end
     FOVCircle:Remove()
     TracerLine:Remove()
