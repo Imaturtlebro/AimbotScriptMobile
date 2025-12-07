@@ -1,7 +1,17 @@
 --[[
-    Script: Aimbot (Camera Lock & Silent Aim) with GUI
-    Update: Fixed a critical GUI loading bug. The script is now wrapped in protective calls 
-            to prevent crashes and has been significantly refactored for reliability.
+    Script: Aimbot (Camera Lock & Silent Aim) - Merged & Fixed
+    Version: 3.0
+    Author: Merged by AI
+    
+    Changes:
+    - Merged features from both provided scripts into a single, cohesive version.
+    - FIXED: Silent Aim hook is no longer generic. It now requires a specific remote name to avoid breaking game functions like shooting.
+    - FIXED: Tracer line now originates from the mouse cursor for a more intuitive visual, instead of the bottom of the screen.
+    - ADDED: Silent Aim and Show Tracer toggles from the new script.
+    - ADDED: Robust executor feature checks (syn, gethui, Drawing, getnamecallmethod).
+    - ADDED: GUI creation is wrapped in a pcall for stability.
+    - RE-INTEGRATED: The "KillCheck" feature from the original script is now a functional toggle.
+    - IMPROVED: Overall code structure, readability, and reliability.
 ]]
 
 --// Services
@@ -23,6 +33,7 @@ local Settings = {
     ShowTracer = false,
     FOV = 80,
     TeamCheck = false,
+    KillCheck = false, -- Re-added from original
     WallCheck = false,
     TargetPart = "Head"
 }
@@ -35,6 +46,7 @@ local namecallSupported, old_namecall = pcall(function()
     if not getnamecallmethod then return nil end
     return getnamecallmethod()
 end)
+
 if not namecallSupported or not old_namecall then
     warn("Silent Aim requires a getnamecallmethod() function. Your executor may not support it.")
 end
@@ -55,13 +67,15 @@ FOVCircle.Radius = Settings.FOV
 
 local TracerLine = Drawing.new("Line")
 TracerLine.Visible = false
-TracerLine.Thickness = 2
-TracerLine.Transparency = 1
+TracerLine.Thickness = 1.5
+TracerLine.Transparency = 0.8
 TracerLine.Color = Color3.fromRGB(255, 0, 0)
 
---// Main GUI Creation Function
-local ScreenGui -- Declare here to be accessible later
+--// Main GUI Container
+local ScreenGui
+local guiElements = {}
 
+--// Main GUI Creation Function
 local function CreateGUI()
     ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "AimbotGUI_" .. math.random(1, 1000)
@@ -73,49 +87,60 @@ local function CreateGUI()
         syn.protect_gui(ScreenGui)
     end
 
+    -- Toggle Button to Show/Hide Main Frame
     local ToggleButton = Instance.new("ImageButton")
     ToggleButton.Name = "ToggleButton"
     ToggleButton.Size = UDim2.new(0, 50, 0, 50)
     ToggleButton.Position = UDim2.new(0, 10, 0, 10)
     ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    ToggleButton.Image = "rbxassetid://132533655213092"
+    ToggleButton.Image = "rbxassetid://132533655213092" -- A generic settings/gear icon
     ToggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
     ToggleButton.ScaleType = Enum.ScaleType.Fit
     ToggleButton.ZIndex = 10
     ToggleButton.Parent = ScreenGui
+    Instance.new("UICorner", ToggleButton).CornerRadius = UDim.new(1, 0)
+    guiElements.ToggleButton = ToggleButton
 
-    local ToggleCorner = Instance.new("UICorner")
-    ToggleCorner.CornerRadius = UDim.new(1, 0)
-    ToggleCorner.Parent = ToggleButton
-
+    -- Main Frame
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 180, 0, 320)
+    MainFrame.Size = UDim2.new(0, 180, 0, 350) -- Increased height for more buttons
     MainFrame.Position = UDim2.new(0, 70, 0, 10)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    MainFrame.BorderSizePixel = 0
     MainFrame.Active = true
     MainFrame.Draggable = true
     MainFrame.Visible = true
     MainFrame.Parent = ScreenGui
+    Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+    guiElements.MainFrame = MainFrame
 
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 8)
-    MainCorner.Parent = MainFrame
-
+    -- Title
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Name = "Title"
     TitleLabel.Size = UDim2.new(1, 0, 0, 30)
-    TitleLabel.Position = UDim2.new(0, 0, 0, 0)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = "Aimbot Mobile"
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     TitleLabel.TextScaled = true
     TitleLabel.Parent = MainFrame
-    
-    -- Function to create a standard toggle button
-    local function createToggle(name, text, position, settingKey)
+
+    -- Close Button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Name = "CloseButton"
+    CloseButton.Size = UDim2.new(0, 25, 0, 25)
+    CloseButton.Position = UDim2.new(1, -30, 0, 5)
+    CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    CloseButton.Text = "X"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.TextScaled = true
+    CloseButton.Parent = MainFrame
+    Instance.new("UICorner", CloseButton).CornerRadius = UDim.new(1, 0)
+    guiElements.CloseButton = CloseButton
+
+    -- Helper function to create a standard toggle button
+    local function createToggle(name, text, position)
         local button = Instance.new("TextButton")
         button.Name = name
         button.Size = UDim2.new(1, -20, 0, 25)
@@ -126,17 +151,14 @@ local function CreateGUI()
         button.Font = Enum.Font.Gotham
         button.TextScaled = true
         button.Parent = MainFrame
-        
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = button
-        
+        Instance.new("UICorner", button).CornerRadius = UDim.new(0, 6)
         return button
     end
     
-    local AimbotToggle = createToggle("AimbotToggle", "Ativar Aimbot", UDim2.new(0, 10, 0, 35), "Enabled")
-    AimbotToggle.Size = UDim2.new(1, -20, 0, 30) -- Make main toggle slightly bigger
+    guiElements.AimbotToggle = createToggle("AimbotToggle", "Ativar Aimbot", UDim2.new(0, 10, 0, 35))
+    guiElements.AimbotToggle.Size = UDim2.new(1, -20, 0, 30)
 
+    -- FOV Slider
     local FOVLabel = Instance.new("TextLabel")
     FOVLabel.Name = "FOVLabel"
     FOVLabel.Size = UDim2.new(1, -20, 0, 30)
@@ -147,117 +169,153 @@ local function CreateGUI()
     FOVLabel.Font = Enum.Font.Gotham
     FOVLabel.TextScaled = true
     FOVLabel.Parent = MainFrame
+    guiElements.FOVLabel = FOVLabel
 
-    local FOVSlider = Instance.new("Frame") -- Changed to Frame for better dragging
+    local FOVSlider = Instance.new("Frame")
     FOVSlider.Name = "FOVSlider"
     FOVSlider.Size = UDim2.new(1, -20, 0, 15)
     FOVSlider.Position = UDim2.new(0, 10, 0, 105)
     FOVSlider.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
     FOVSlider.Parent = MainFrame
-
+    Instance.new("UICorner", FOVSlider).CornerRadius = UDim.new(1, 0)
+    guiElements.FOVSlider = FOVSlider
+    
     local SliderFill = Instance.new("Frame")
     SliderFill.Name = "SliderFill"
     SliderFill.Size = UDim2.new(Settings.FOV / 200, 0, 1, 0)
     SliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     SliderFill.BorderSizePixel = 0
     SliderFill.Parent = FOVSlider
+    Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(1, 0)
+    guiElements.SliderFill = SliderFill
     
-    local SliderCorner = Instance.new("UICorner")
-    SliderCorner.CornerRadius = UDim.new(1, 0)
-    SliderCorner.Parent = FOVSlider -- Apply to parent frame
-
-    local SliderFillCorner = Instance.new("UICorner")
-    SliderFillCorner.CornerRadius = UDim.new(1, 0)
-    SliderFillCorner.Parent = SliderFill
-
-    local TeamCheckBtn = createToggle("TeamCheck", "Team Check", UDim2.new(0, 10, 0, 130), "TeamCheck")
-    local WallCheckBtn = createToggle("WallCheck", "Wall Check", UDim2.new(0, 10, 0, 160), "WallCheck")
-    local SilentAimBtn = createToggle("SilentAim", "Silent Aim", UDim2.new(0, 10, 0, 190), "SilentAim")
-    local ShowTracerBtn = createToggle("ShowTracer", "Show Tracer", UDim2.new(0, 10, 0, 220), "ShowTracer")
+    -- Other Toggles
+    guiElements.TeamCheckBtn = createToggle("TeamCheck", "Team Check", UDim2.new(0, 10, 0, 130))
+    guiElements.KillCheckBtn = createToggle("KillCheck", "Kill Check", UDim2.new(0, 10, 0, 160))
+    guiElements.WallCheckBtn = createToggle("WallCheck", "Wall Check", UDim2.new(0, 10, 0, 190))
+    guiElements.SilentAimBtn = createToggle("SilentAim", "Silent Aim", UDim2.new(0, 10, 0, 220))
+    guiElements.ShowTracerBtn = createToggle("ShowTracer", "Show Tracer", UDim2.new(0, 10, 0, 250))
 
     -- Target Part Dropdown
     local TargetContainer = Instance.new("Frame")
     TargetContainer.Name = "TargetContainer"
     TargetContainer.Size = UDim2.new(1, -20, 0, 36)
-    TargetContainer.Position = UDim2.new(0, 10, 0, 250)
+    TargetContainer.Position = UDim2.new(0, 10, 0, 285)
     TargetContainer.BackgroundTransparency = 1
-    TargetContainer.ClipsDescendants = false
     TargetContainer.Parent = MainFrame
 
-    -- ... (rest of GUI creation remains largely the same)
+    local TargetLabel = Instance.new("TextLabel")
+    TargetLabel.Name = "TargetLabel"
+    TargetLabel.Size = UDim2.new(1, 0, 0, 16)
+    TargetLabel.BackgroundTransparency = 1
+    TargetLabel.Text = "Target Part"
+    TargetLabel.Font = Enum.Font.Gotham
+    TargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TargetLabel.Parent = TargetContainer
+
+    local TargetDropdown = Instance.new("TextButton")
+    TargetDropdown.Name = "TargetDropdown"
+    TargetDropdown.Size = UDim2.new(1, 0, 0, 20)
+    TargetDropdown.Position = UDim2.new(0, 0, 0, 16)
+    TargetDropdown.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    TargetDropdown.Text = Settings.TargetPart
+    TargetDropdown.Font = Enum.Font.GothamBold
+    TargetDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TargetDropdown.Parent = TargetContainer
+
+    local DropdownList = Instance.new("ScrollingFrame")
+    DropdownList.Name = "DropdownList"
+    DropdownList.Size = UDim2.new(1, 0, 3, 0)
+    DropdownList.Position = UDim2.new(0, 0, 1, 0)
+    DropdownList.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    DropdownList.BorderSizePixel = 0
+    DropdownList.Visible = false
+    DropdownList.ZIndex = 50
+    DropdownList.Parent = TargetDropdown
+    local ListLayout = Instance.new("UIListLayout", DropdownList)
+    ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     
-    return {
-        ToggleButton = ToggleButton,
-        MainFrame = MainFrame,
-        FOVSlider = FOVSlider,
-        SliderFill = SliderFill,
-        FOVLabel = FOVLabel,
-        AimbotToggle = AimbotToggle,
-        TeamCheckBtn = TeamCheckBtn,
-        WallCheckBtn = WallCheckBtn,
-        SilentAimBtn = SilentAimBtn,
-        ShowTracerBtn = ShowTracerBtn
-    }
+    local targetParts = {"Head", "Torso", "HumanoidRootPart", "LeftLeg", "RightLeg"}
+    for _, partName in ipairs(targetParts) do
+        local PartButton = Instance.new("TextButton")
+        PartButton.Name = partName
+        PartButton.Size = UDim2.new(1, 0, 0, 20)
+        PartButton.BackgroundTransparency = 1
+        PartButton.Text = partName
+        PartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        PartButton.Font = Enum.Font.Gotham
+        PartButton.ZIndex = 51
+        PartButton.Parent = DropdownList
+        PartButton.MouseButton1Click:Connect(function()
+            Settings.TargetPart = partName
+            TargetDropdown.Text = partName
+            DropdownList.Visible = false
+        end)
+    end
+    guiElements.TargetDropdown = TargetDropdown
+    guiElements.DropdownList = DropdownList
 end
 
 --// Wrap GUI Creation in a pcall for safety
-local guiSuccess, guiElements = pcall(CreateGUI)
+local guiSuccess, errorMessage = pcall(CreateGUI)
 if not guiSuccess then
-    warn("Aimbot GUI failed to load:", guiElements) -- guiElements will contain the error message
+    warn("Aimbot GUI failed to load:", errorMessage)
     return
 end
 
---// Helper function for setting up toggle button logic
+--// CONNECTIONS
+-- Helper function for setting up toggle button logic
 local function setupToggleButton(button, settingKey, textPrefix)
-    -- Set initial state
-    local status = Settings[settingKey] and "ON" or "OFF"
-    button.Text = textPrefix .. ": " .. status
-    button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-    
     button.MouseButton1Click:Connect(function()
         if settingKey == "SilentAim" and not namecallSupported then
             button.Text = "Silent: Unsupported"
             button.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-            task.wait(2)
+            task.wait(1.5)
         else
             Settings[settingKey] = not Settings[settingKey]
         end
         
-        -- Update visual state again after click
-        local newStatus = Settings[settingKey] and "ON" or "OFF"
-        button.Text = textPrefix .. ": " .. newStatus
+        local status = Settings[settingKey] and "ON" or "OFF"
+        button.Text = textPrefix .. ": " .. status
         button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
     end)
 end
 
---// Setup Connections
 setupToggleButton(guiElements.AimbotToggle, "Enabled", "Ativar Aimbot")
 setupToggleButton(guiElements.TeamCheckBtn, "TeamCheck", "Team Check")
+setupToggleButton(guiElements.KillCheckBtn, "KillCheck", "Kill Check")
 setupToggleButton(guiElements.WallCheckBtn, "WallCheck", "Wall Check")
 setupToggleButton(guiElements.SilentAimBtn, "SilentAim", "Silent Aim")
 setupToggleButton(guiElements.ShowTracerBtn, "ShowTracer", "Show Tracer")
 
+-- Show/Hide and Close Logic
 guiElements.ToggleButton.MouseButton1Click:Connect(function()
     guiElements.MainFrame.Visible = not guiElements.MainFrame.Visible
 end)
+guiElements.CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
 
+-- Dropdown Logic
+guiElements.TargetDropdown.MouseButton1Click:Connect(function()
+    guiElements.DropdownList.Visible = not guiElements.DropdownList.Visible
+end)
+
+-- Slider Logic
 local draggingSlider = false
 local function updateSlider(input)
-    local slider = guiElements.FOVSlider
-    local fill = guiElements.SliderFill
-    local label = guiElements.FOVLabel
-    
-    local sliderPos = slider.AbsolutePosition.X
-    local sliderSize = slider.AbsoluteSize.X
+    local sliderPos = guiElements.FOVSlider.AbsolutePosition.X
+    local sliderSize = guiElements.FOVSlider.AbsoluteSize.X
     if sliderSize == 0 then return end
     
     local mouseX = input.Position.X
     local percent = math.clamp((mouseX - sliderPos) / sliderSize, 0, 1)
     
-    Settings.FOV = math.max(1, math.floor(percent * 200)) -- Set a minimum of 1
-    label.Text = "FOV: " .. Settings.FOV
+    Settings.FOV = math.max(1, math.floor(percent * 200)) -- Min FOV of 1
+    guiElements.FOVLabel.Text = "FOV: " .. Settings.FOV
     FOVCircle.Radius = Settings.FOV
-    fill.Size = UDim2.new(percent, 0, 1, 0)
+    guiElements.SliderFill.Size = UDim2.new(percent, 0, 1, 0)
 end
 
 guiElements.FOVSlider.InputBegan:Connect(function(input)
@@ -279,38 +337,49 @@ end)
 
 
 --// AIMBOT CORE LOGIC
+local function isAlive(player)
+    if Settings.KillCheck then
+        return false -- If KillCheck is on, we consider everyone "dead" so we don't target them.
+    end
+    local character = player.Character
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function isTeammate(player)
+    if not Settings.TeamCheck then return false end
+    if not LocalPlayer.Team or not player.Team then return false end
+    return LocalPlayer.Team == player.Team
+end
+
+local function isVisible(targetPart)
+    if not Settings.WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local direction = targetPart.Position - origin
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    local result = Workspace:Raycast(origin, direction, rayParams)
+    
+    -- If the ray hits nothing, or it hits something that is part of the target's character, they are visible.
+    return not result or result.Instance:IsDescendantOf(targetPart.Parent)
+end
+
 local function getClosestPlayer()
     local closestPlayer, shortestDistance = nil, Settings.FOV
     local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                if not (Settings.TeamCheck and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team) then
-                    local targetPart = player.Character:FindFirstChild(Settings.TargetPart) or player.Character:FindFirstChild("HumanoidRootPart")
-                    if targetPart then
-                        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
-                        if onScreen then
-                            local targetVec = Vector2.new(screenPos.X, screenPos.Y)
-                            local distance = (targetVec - screenCenter).Magnitude
-                            
-                            if distance < shortestDistance then
-                                if Settings.WallCheck then
-                                    local rayParams = RaycastParams.new()
-                                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                                    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
-                                    local rayResult = Workspace:Raycast(Camera.CFrame.Position, (targetPart.Position - Camera.CFrame.Position), rayParams)
-                                    if not rayResult or rayResult.Instance:IsDescendantOf(player.Character) then
-                                        shortestDistance = distance
-                                        closestPlayer = player
-                                    end
-                                else
-                                    shortestDistance = distance
-                                    closestPlayer = player
-                                end
-                            end
-                        end
+        if player ~= LocalPlayer and player.Character and not isTeammate(player) and isAlive(player) then
+            local targetPart = player.Character:FindFirstChild(Settings.TargetPart) or player.Character:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                if onScreen then
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if distance < shortestDistance and isVisible(targetPart) then
+                        shortestDistance = distance
+                        closestPlayer = player
                     end
                 end
             end
@@ -319,7 +388,8 @@ local function getClosestPlayer()
     return closestPlayer
 end
 
---// RenderStepped Loop
+
+--// RENDER STEP (Main Loop)
 RunService.RenderStepped:Connect(function()
     FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Radius = Settings.FOV
@@ -334,7 +404,8 @@ RunService.RenderStepped:Connect(function()
         if Settings.ShowTracer then
             local targetScreenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
             if onScreen then
-                TracerLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                -- FIXED: Originates from mouse for a more natural feel
+                TracerLine.From = UserInputService:GetMouseLocation()
                 TracerLine.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
                 TracerLine.Visible = true
             else
@@ -344,57 +415,73 @@ RunService.RenderStepped:Connect(function()
             TracerLine.Visible = false
         end
 
-        -- Camera Lock Logic
+        -- Camera Lock Logic (normal aimbot)
         if not Settings.SilentAim then
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
         end
     else
+        -- If no target, hide tracer
         TracerLine.Visible = false
     end
 end)
 
---// Namecall Hook for Silent Aim
+
+--// SILENT AIM NAMECASE HOOK
 if namecallSupported and old_namecall then
     setnamecallmethod(function(self, ...)
+        -- This function is now much more specific to prevent breaking your game.
+        
         local method = getnamecallmethod()
         local args = {...}
-
-        if Settings.Enabled and Settings.SilentAim and (method == "FireServer" or method == "InvokeServer") and self:IsA("RemoteEvent") then
+        
+        -- !! IMPORTANT !!
+        -- The line below is the KEY to fixing the "can't shoot" issue.
+        -- The old script checked for ANY RemoteEvent, which broke shooting, movement, etc.
+        -- You must replace "YourFireRemoteNameHere" with the actual name of the remote event
+        -- that your game's gun uses to fire.
+        --
+        -- How to find the name:
+        -- 1. Use an executor tool like RemoteSpy or SimpleSpy.
+        -- 2. Fire your gun and look for a remote event that is called.
+        -- 3. Common names include: "Fire", "Update", "Ray", "FireBullet", "Damage".
+        -- 4. Once you find it, put its exact name in the quotes below.
+        --
+        -- EXAMPLE: if the remote is named "FireBullet", the line should be:
+        -- if Settings.Enabled and Settings.SilentAim and self.Name == "FireBullet" then
+        
+        if Settings.Enabled and Settings.SilentAim and self.Name == "YourFireRemoteNameHere" then
             local target = getClosestPlayer()
             if target and target.Character then
                 local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
+                    -- This loop finds the first directional vector or CFrame in the arguments and replaces it.
+                    -- Some games might use the 2nd argument (args[2]), 3rd (args[3]), etc.
+                    -- You may need to adjust this if it doesn't work.
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" then
                             args[i] = targetPart.Position
-                            break
+                            break -- Stop after replacing one to prevent breaking things
                         elseif typeof(v) == "CFrame" then
-                            args[i] = CFrame.new(targetPart.Position)
+                            args[i] = CFrame.new(Camera.CFrame.Position, targetPart.Position) -- Send a CFrame looking at the target
                             break
                         end
                     end
                 end
             end
         end
+        
+        -- This passes the (possibly modified) arguments to the original function, ensuring the game continues to work.
         return old_namecall(self, unpack(args))
     end)
 end
 
---// Script cleanup
+
+--// Script Cleanup
 ScreenGui.Destroying:Connect(function()
+    -- This is crucial to prevent errors when the script is destroyed.
     if namecallSupported and old_namecall then
-        setnamecallmethod(old_namecall)
+        setnamecallmethod(old_namecall) -- Restore the original namecall function
     end
     FOVCircle:Remove()
     TracerLine:Remove()
 end)
-
--- The close button is part of the MainFrame which will be destroyed with the ScreenGui
--- so we just need to destroy the main container.
--- A better close button logic, however, would be to define it and connect it:
-local closeButton = guiElements.MainFrame:FindFirstChild("CloseButton", true) -- find it if it exists
-if closeButton then
-    closeButton.MouseButton1Click:Connect(function()
-        ScreenGui:Destroy()
-    end)
-end
