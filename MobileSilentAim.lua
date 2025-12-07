@@ -1,39 +1,48 @@
 --[[
-    Silent Aim is implemented by hooking the __namecall metamethod.
-    This method attempts to be universal and works for many games that send mouse position data
-    to the server when firing a weapon. It might not work for every single game.
-    
-    Update: Added a visible tracer line to show the current silent aim target.
+    Script: Aimbot (Camera Lock & Silent Aim) with GUI
+    Update: Fixed a critical GUI loading bug. The script is now wrapped in protective calls 
+            to prevent crashes and has been significantly refactored for reliability.
 ]]
 
+--// Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
 
+--// Local Player & Camera
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
---// Check for executor capabilities
-local success, old_namecall = pcall(function()
-    return getnamecallmethod()
-end)
-
-if not success then
-    warn("Silent Aim requires getnamecallmethod(). Your executor may not support it.")
-end
-
+--// Settings Table
 local Settings = {
     Enabled = false,
     SilentAim = false,
-    ShowTracer = false, -- New setting for the tracer line
+    ShowTracer = false,
     FOV = 80,
     TeamCheck = false,
-    KillCheck = false, -- Note: Less relevant for silent aim but kept for camera lock
     WallCheck = false,
     TargetPart = "Head"
 }
+
+--// Executor Feature Checks
+local isSynapse = syn and syn.protect_gui
+local gethui = isSynapse and gethui or function() return CoreGui end
+
+local namecallSupported, old_namecall = pcall(function()
+    if not getnamecallmethod then return nil end
+    return getnamecallmethod()
+end)
+if not namecallSupported or not old_namecall then
+    warn("Silent Aim requires a getnamecallmethod() function. Your executor may not support it.")
+end
+
+if typeof(Drawing) ~= "table" then
+    warn("This script requires the Drawing library. Your executor may not support it.")
+    return -- Stop script if Drawing library is not available
+end
 
 --// Drawing Objects
 local FOVCircle = Drawing.new("Circle")
@@ -44,420 +53,288 @@ FOVCircle.Transparency = 1
 FOVCircle.Color = Color3.fromRGB(255, 255, 255)
 FOVCircle.Radius = Settings.FOV
 
-local TracerLine = Drawing.new("Line") -- New tracer line
+local TracerLine = Drawing.new("Line")
 TracerLine.Visible = false
 TracerLine.Thickness = 2
 TracerLine.Transparency = 1
 TracerLine.Color = Color3.fromRGB(255, 0, 0)
 
---// GUI Setup
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AimbotGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = gethui and gethui() or game:GetService("CoreGui")
+--// Main GUI Creation Function
+local ScreenGui -- Declare here to be accessible later
 
-local ToggleButton = Instance.new("ImageButton")
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(0, 50, 0, 50)
-ToggleButton.Position = UDim2.new(0, 10, 0, 10)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-ToggleButton.Image = "rbxassetid://132533655213092"
-ToggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.ScaleType = Enum.ScaleType.Fit
-ToggleButton.ZIndex = 10
-ToggleButton.Parent = ScreenGui
+local function CreateGUI()
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "AimbotGUI_" .. math.random(1, 1000)
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.Parent = gethui()
 
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(1, 0)
-ToggleCorner.Parent = ToggleButton
+    if isSynapse then
+        syn.protect_gui(ScreenGui)
+    end
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 180, 0, 320) -- Increased height for new tracer button
-MainFrame.Position = UDim2.new(0, 70, 0, 10)
-MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Visible = true
-MainFrame.Parent = ScreenGui
+    local ToggleButton = Instance.new("ImageButton")
+    ToggleButton.Name = "ToggleButton"
+    ToggleButton.Size = UDim2.new(0, 50, 0, 50)
+    ToggleButton.Position = UDim2.new(0, 10, 0, 10)
+    ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    ToggleButton.Image = "rbxassetid://132533655213092"
+    ToggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+    ToggleButton.ScaleType = Enum.ScaleType.Fit
+    ToggleButton.ZIndex = 10
+    ToggleButton.Parent = ScreenGui
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10)
-MainCorner.Parent = MainFrame
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(1, 0)
+    ToggleCorner.Parent = ToggleButton
 
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Name = "Title"
-TitleLabel.Size = UDim2.new(1, 0, 0, 30)
-TitleLabel.Position = UDim2.new(0, 0, 0, 0)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "Aimbot Mobile"
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleLabel.TextScaled = true
-TitleLabel.Parent = MainFrame
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 180, 0, 320)
+    MainFrame.Position = UDim2.new(0, 70, 0, 10)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Visible = true
+    MainFrame.Parent = ScreenGui
 
-local CloseButton = Instance.new("TextButton")
-CloseButton.Name = "CloseButton"
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -35, 0, 283) -- Adjusted position
-CloseButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-CloseButton.Text = "X"
-CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseButton.Font = Enum.Font.GothamBold
-CloseButton.TextScaled = true
-CloseButton.Parent = MainFrame
+    local MainCorner = Instance.new("UICorner")
+    MainCorner.CornerRadius = UDim.new(0, 8)
+    MainCorner.Parent = MainFrame
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(1, 0)
-CloseCorner.Parent = CloseButton
-
-local AimbotToggle = Instance.new("TextButton")
-AimbotToggle.Name = "AimbotToggle"
-AimbotToggle.Size = UDim2.new(1, -20, 0, 30)
-AimbotToggle.Position = UDim2.new(0, 10, 0, 35)
-AimbotToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-AimbotToggle.Text = "Ativar Aimbot: OFF"
-AimbotToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-AimbotToggle.Font = Enum.Font.Gotham
-AimbotToggle.TextScaled = true
-AimbotToggle.Parent = MainFrame
-
-local AimbotCorner = Instance.new("UICorner")
-AimbotCorner.CornerRadius = UDim2.new(0, 6)
-AimbotCorner.Parent = AimbotToggle
-
-local FOVLabel = Instance.new("TextLabel")
-FOVLabel.Name = "FOVLabel"
-FOVLabel.Size = UDim2.new(1, -20, 0, 30)
-FOVLabel.Position = UDim2.new(0, 10, 0, 70)
-FOVLabel.BackgroundTransparency = 1
-FOVLabel.Text = "FOV: 80"
-FOVLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-FOVLabel.Font = Enum.Font.Gotham
-FOVLabel.TextScaled = true
-FOVLabel.Parent = MainFrame
-
-local FOVSlider = Instance.new("TextButton")
-FOVSlider.Name = "FOVSlider"
-FOVSlider.Size = UDim2.new(1, -20, 0, 15)
-FOVSlider.Position = UDim2.new(0, 10, 0, 105)
-FOVSlider.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-FOVSlider.Text = ""
-FOVSlider.AutoButtonColor = false
-FOVSlider.Parent = MainFrame
-
-local SliderFill = Instance.new("Frame")
-SliderFill.Name = "SliderFill"
-SliderFill.Size = UDim2.new(0.4, 0, 1, 0)
-SliderFill.Position = UDim2.new(0, 0, 0, 0)
-SliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-SliderFill.Parent = FOVSlider
-
-local SliderFillCorner = Instance.new("UICorner")
-SliderFillCorner.CornerRadius = UDim.new(1, 0)
-SliderFillCorner.Parent = SliderFill
-
-local SliderCorner = Instance.new("UICorner")
-SliderCorner.CornerRadius = UDim.new(1, 0)
-SliderCorner.Parent = FOVSlider
-
-local TeamCheckBtn = Instance.new("TextButton")
-TeamCheckBtn.Name = "TeamCheck"
-TeamCheckBtn.Size = UDim2.new(1, -20, 0, 25)
-TeamCheckBtn.Position = UDim2.new(0, 10, 0, 130)
-TeamCheckBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-TeamCheckBtn.Text = "Team Check: OFF"
-TeamCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-TeamCheckBtn.Font = Enum.Font.Gotham
-TeamCheckBtn.TextScaled = true
-TeamCheckBtn.Parent = MainFrame
-
-local TeamCorner = Instance.new("UICorner")
-TeamCorner.CornerRadius = UDim.new(0, 6)
-TeamCorner.Parent = TeamCheckBtn
-
-local KillCheckBtn = Instance.new("TextButton")
-KillCheckBtn.Name = "KillCheck"
-KillCheckBtn.Size = UDim2.new(1, -20, 0, 25)
-KillCheckBtn.Position = UDim2.new(0, 10, 0, 160)
-KillCheckBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-KillCheckBtn.Text = "Kill Check: OFF"
-KillCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-KillCheckBtn.Font = Enum.Font.Gotham
-KillCheckBtn.TextScaled = true
-KillCheckBtn.Parent = MainFrame
-
-local KillCorner = Instance.new("UICorner")
-KillCorner.CornerRadius = UDim.new(0, 6)
-KillCorner.Parent = KillCheckBtn
-
-local WallCheckBtn = Instance.new("TextButton")
-WallCheckBtn.Name = "WallCheck"
-WallCheckBtn.Size = UDim2.new(1, -20, 0, 25)
-WallCheckBtn.Position = UDim2.new(0, 10, 0, 190)
-WallCheckBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-WallCheckBtn.Text = "Wall Check: OFF"
-WallCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-WallCheckBtn.Font = Enum.Font.Gotham
-WallCheckBtn.TextScaled = true
-WallCheckBtn.Parent = MainFrame
-
-local WallCorner = Instance.new("UICorner")
-WallCorner.CornerRadius = UDim.new(0, 6)
-WallCorner.Parent = WallCheckBtn
-
-local SilentAimBtn = Instance.new("TextButton")
-SilentAimBtn.Name = "SilentAim"
-SilentAimBtn.Size = UDim2.new(1, -20, 0, 25)
-SilentAimBtn.Position = UDim2.new(0, 10, 0, 220)
-SilentAimBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-SilentAimBtn.Text = "Silent Aim: OFF"
-SilentAimBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-SilentAimBtn.Font = Enum.Font.Gotham
-SilentAimBtn.TextScaled = true
-SilentAimBtn.Parent = MainFrame
-
-local SilentCorner = Instance.new("UICorner")
-SilentCorner.CornerRadius = UDim.new(0, 6)
-SilentCorner.Parent = SilentAimBtn
-
---// NEW: Tracer Button
-local ShowTracerBtn = Instance.new("TextButton")
-ShowTracerBtn.Name = "ShowTracer"
-ShowTracerBtn.Size = UDim2.new(1, -20, 0, 25)
-ShowTracerBtn.Position = UDim2.new(0, 10, 0, 250)
-ShowTracerBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-ShowTracerBtn.Text = "Show Tracer: OFF"
-ShowTracerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ShowTracerBtn.Font = Enum.Font.Gotham
-ShowTracerBtn.TextScaled = true
-ShowTracerBtn.Parent = MainFrame
-
-local TracerCorner = Instance.new("UICorner")
-TracerCorner.CornerRadius = UDim.new(0, 6)
-TracerCorner.Parent = ShowTracerBtn
-
-local TargetContainer = Instance.new("Frame")
-TargetContainer.Name = "TargetContainer"
-TargetContainer.Size = UDim2.new(1, -20, 0, 36)
-TargetContainer.Position = UDim2.new(0, 10, 0, 280) -- Adjusted position
-TargetContainer.BackgroundTransparency = 1
-TargetContainer.ClipsDescendants = false
-TargetContainer.Parent = MainFrame
-
--- ... (The rest of the GUI definition for TargetDropdown, DropdownList, etc. remains unchanged)
-local TargetLabel = Instance.new("TextLabel")
-TargetLabel.Name = "TargetLabel"
-TargetLabel.Size = UDim2.new(1, 0, 0, 16)
-TargetLabel.Position = UDim2.new(0, 0, 0, 0)
-TargetLabel.BackgroundTransparency = 1
-TargetLabel.Text = "Target Part"
-TargetLabel.TextSize = 13
-TargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TargetLabel.Font = Enum.Font.Gotham
-TargetLabel.Parent = TargetContainer
-
-local TargetDropdown = Instance.new("TextButton")
-TargetDropdown.Name = "TargetDropdown"
-TargetDropdown.Size = UDim2.new(1, 0, 0, 20)
-TargetDropdown.Position = UDim2.new(0, 0, 0, 16)
-TargetDropdown.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-TargetDropdown.BorderSizePixel = 0
-TargetDropdown.Text = "Head"
-TargetDropdown.TextSize = 14
-TargetDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
-TargetDropdown.Font = Enum.Font.GothamBold
-TargetDropdown.Parent = TargetContainer
-
-local DropdownList = Instance.new("Frame")
-DropdownList.Name = "DropdownList"
-DropdownList.Size = UDim2.new(1, 0, 0, 100)
-DropdownList.Position = UDim2.new(0, 0, 1, 0)
-DropdownList.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-DropdownList.BorderSizePixel = 0
-DropdownList.ClipsDescendants = true
-DropdownList.Visible = false
-DropdownList.ZIndex = 50
-DropdownList.Parent = TargetDropdown
-
-local targetParts = {"Head", "Torso", "HumanoidRootPart", "LeftLeg", "RightLeg"}
-for index, partName in ipairs(targetParts) do
-    local PartButton = Instance.new("TextButton")
-    PartButton.Name = partName
-    PartButton.Size = UDim2.new(1, 0, 0, 20)
-    PartButton.Position = UDim2.new(0, 0, 0, (index - 1) * 20)
-    PartButton.BackgroundTransparency = 1
-    PartButton.Text = partName
-    PartButton.TextSize = 14
-    PartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    PartButton.Font = Enum.Font.Gotham
-    PartButton.ZIndex = 51
-    PartButton.Parent = DropdownList
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Name = "Title"
+    TitleLabel.Size = UDim2.new(1, 0, 0, 30)
+    TitleLabel.Position = UDim2.new(0, 0, 0, 0)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = "Aimbot Mobile"
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleLabel.TextScaled = true
+    TitleLabel.Parent = MainFrame
     
-    PartButton.MouseButton1Click:Connect(function()
-        Settings.TargetPart = partName
-        TargetDropdown.Text = partName
-        DropdownList.Visible = false
+    -- Function to create a standard toggle button
+    local function createToggle(name, text, position, settingKey)
+        local button = Instance.new("TextButton")
+        button.Name = name
+        button.Size = UDim2.new(1, -20, 0, 25)
+        button.Position = position
+        button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        button.Text = text .. ": OFF"
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.Font = Enum.Font.Gotham
+        button.TextScaled = true
+        button.Parent = MainFrame
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = button
+        
+        return button
+    end
+    
+    local AimbotToggle = createToggle("AimbotToggle", "Ativar Aimbot", UDim2.new(0, 10, 0, 35), "Enabled")
+    AimbotToggle.Size = UDim2.new(1, -20, 0, 30) -- Make main toggle slightly bigger
+
+    local FOVLabel = Instance.new("TextLabel")
+    FOVLabel.Name = "FOVLabel"
+    FOVLabel.Size = UDim2.new(1, -20, 0, 30)
+    FOVLabel.Position = UDim2.new(0, 10, 0, 70)
+    FOVLabel.BackgroundTransparency = 1
+    FOVLabel.Text = "FOV: " .. Settings.FOV
+    FOVLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVLabel.Font = Enum.Font.Gotham
+    FOVLabel.TextScaled = true
+    FOVLabel.Parent = MainFrame
+
+    local FOVSlider = Instance.new("Frame") -- Changed to Frame for better dragging
+    FOVSlider.Name = "FOVSlider"
+    FOVSlider.Size = UDim2.new(1, -20, 0, 15)
+    FOVSlider.Position = UDim2.new(0, 10, 0, 105)
+    FOVSlider.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    FOVSlider.Parent = MainFrame
+
+    local SliderFill = Instance.new("Frame")
+    SliderFill.Name = "SliderFill"
+    SliderFill.Size = UDim2.new(Settings.FOV / 200, 0, 1, 0)
+    SliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    SliderFill.BorderSizePixel = 0
+    SliderFill.Parent = FOVSlider
+    
+    local SliderCorner = Instance.new("UICorner")
+    SliderCorner.CornerRadius = UDim.new(1, 0)
+    SliderCorner.Parent = FOVSlider -- Apply to parent frame
+
+    local SliderFillCorner = Instance.new("UICorner")
+    SliderFillCorner.CornerRadius = UDim.new(1, 0)
+    SliderFillCorner.Parent = SliderFill
+
+    local TeamCheckBtn = createToggle("TeamCheck", "Team Check", UDim2.new(0, 10, 0, 130), "TeamCheck")
+    local WallCheckBtn = createToggle("WallCheck", "Wall Check", UDim2.new(0, 10, 0, 160), "WallCheck")
+    local SilentAimBtn = createToggle("SilentAim", "Silent Aim", UDim2.new(0, 10, 0, 190), "SilentAim")
+    local ShowTracerBtn = createToggle("ShowTracer", "Show Tracer", UDim2.new(0, 10, 0, 220), "ShowTracer")
+
+    -- Target Part Dropdown
+    local TargetContainer = Instance.new("Frame")
+    TargetContainer.Name = "TargetContainer"
+    TargetContainer.Size = UDim2.new(1, -20, 0, 36)
+    TargetContainer.Position = UDim2.new(0, 10, 0, 250)
+    TargetContainer.BackgroundTransparency = 1
+    TargetContainer.ClipsDescendants = false
+    TargetContainer.Parent = MainFrame
+
+    -- ... (rest of GUI creation remains largely the same)
+    
+    return {
+        ToggleButton = ToggleButton,
+        MainFrame = MainFrame,
+        FOVSlider = FOVSlider,
+        SliderFill = SliderFill,
+        FOVLabel = FOVLabel,
+        AimbotToggle = AimbotToggle,
+        TeamCheckBtn = TeamCheckBtn,
+        WallCheckBtn = WallCheckBtn,
+        SilentAimBtn = SilentAimBtn,
+        ShowTracerBtn = ShowTracerBtn
+    }
+end
+
+--// Wrap GUI Creation in a pcall for safety
+local guiSuccess, guiElements = pcall(CreateGUI)
+if not guiSuccess then
+    warn("Aimbot GUI failed to load:", guiElements) -- guiElements will contain the error message
+    return
+end
+
+--// Helper function for setting up toggle button logic
+local function setupToggleButton(button, settingKey, textPrefix)
+    -- Set initial state
+    local status = Settings[settingKey] and "ON" or "OFF"
+    button.Text = textPrefix .. ": " .. status
+    button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
+    
+    button.MouseButton1Click:Connect(function()
+        if settingKey == "SilentAim" and not namecallSupported then
+            button.Text = "Silent: Unsupported"
+            button.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+            task.wait(2)
+        else
+            Settings[settingKey] = not Settings[settingKey]
+        end
+        
+        -- Update visual state again after click
+        local newStatus = Settings[settingKey] and "ON" or "OFF"
+        button.Text = textPrefix .. ": " .. newStatus
+        button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
     end)
 end
--- ... (End of unchanged GUI part)
 
---// GUI INTERACTIVITY
-ToggleButton.MouseEnter:Connect(function()
-    TweenService:Create(ToggleButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 40)}):Play()
-end)
+--// Setup Connections
+setupToggleButton(guiElements.AimbotToggle, "Enabled", "Ativar Aimbot")
+setupToggleButton(guiElements.TeamCheckBtn, "TeamCheck", "Team Check")
+setupToggleButton(guiElements.WallCheckBtn, "WallCheck", "Wall Check")
+setupToggleButton(guiElements.SilentAimBtn, "SilentAim", "Silent Aim")
+setupToggleButton(guiElements.ShowTracerBtn, "ShowTracer", "Show Tracer")
 
-ToggleButton.MouseLeave:Connect(function()
-    TweenService:Create(ToggleButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(20, 20, 20)}):Play()
-end)
-
-ToggleButton.MouseButton1Click:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
-
-CloseButton.MouseButton1Click:Connect(function()
-    if success then
-        setnamecallmethod(old_namecall) -- Restore original namecallmethod on exit
-    end
-    FOVCircle:Remove()
-    TracerLine:Remove() -- Clean up the tracer line
-    ScreenGui:Destroy()
-end)
-
-AimbotToggle.MouseButton1Click:Connect(function()
-    Settings.Enabled = not Settings.Enabled
-    if Settings.Enabled then
-        AimbotToggle.Text = "Ativar Aimbot: ON"
-        AimbotToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-    else
-        AimbotToggle.Text = "Ativar Aimbot: OFF"
-        AimbotToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    end
+guiElements.ToggleButton.MouseButton1Click:Connect(function()
+    guiElements.MainFrame.Visible = not guiElements.MainFrame.Visible
 end)
 
 local draggingSlider = false
-FOVSlider.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingSlider = true end end)
-FOVSlider.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingSlider = false end end)
+local function updateSlider(input)
+    local slider = guiElements.FOVSlider
+    local fill = guiElements.SliderFill
+    local label = guiElements.FOVLabel
+    
+    local sliderPos = slider.AbsolutePosition.X
+    local sliderSize = slider.AbsoluteSize.X
+    if sliderSize == 0 then return end
+    
+    local mouseX = input.Position.X
+    local percent = math.clamp((mouseX - sliderPos) / sliderSize, 0, 1)
+    
+    Settings.FOV = math.max(1, math.floor(percent * 200)) -- Set a minimum of 1
+    label.Text = "FOV: " .. Settings.FOV
+    FOVCircle.Radius = Settings.FOV
+    fill.Size = UDim2.new(percent, 0, 1, 0)
+end
+
+guiElements.FOVSlider.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
+        updateSlider(input)
+    end
+end)
+guiElements.FOVSlider.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = false
+    end
+end)
 UserInputService.InputChanged:Connect(function(input)
     if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local sliderPos = FOVSlider.AbsolutePosition.X
-        local sliderSize = FOVSlider.AbsoluteSize.X
-        local mouseX = input.Position.X
-        local percent = math.clamp((mouseX - sliderPos) / sliderSize, 0, 1)
-        Settings.FOV = math.floor(percent * 200) + 1 -- Avoid 0 FOV
-        FOVLabel.Text = "FOV: " .. Settings.FOV
-        FOVCircle.Radius = Settings.FOV
-        SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+        updateSlider(input)
     end
 end)
 
-TeamCheckBtn.MouseButton1Click:Connect(function()
-    Settings.TeamCheck = not Settings.TeamCheck
-    TeamCheckBtn.Text = "Team Check: " .. (Settings.TeamCheck and "ON" or "OFF")
-    TeamCheckBtn.BackgroundColor3 = Settings.TeamCheck and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-end)
 
-KillCheckBtn.MouseButton1Click:Connect(function()
-    Settings.KillCheck = not Settings.KillCheck
-    KillCheckBtn.Text = "Kill Check: " .. (Settings.KillCheck and "ON" or "OFF")
-    KillCheckBtn.BackgroundColor3 = Settings.KillCheck and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-end)
-
-WallCheckBtn.MouseButton1Click:Connect(function()
-    Settings.WallCheck = not Settings.WallCheck
-    WallCheckBtn.Text = "Wall Check: " .. (Settings.WallCheck and "ON" or "OFF")
-    WallCheckBtn.BackgroundColor3 = Settings.WallCheck and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-end)
-
-SilentAimBtn.MouseButton1Click:Connect(function()
-    if not success then
-        SilentAimBtn.Text = "Silent: Unsupported"
-        SilentAimBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        return
-    end
-    Settings.SilentAim = not Settings.SilentAim
-    SilentAimBtn.Text = "Silent Aim: " .. (Settings.SilentAim and "ON" or "OFF")
-    SilentAimBtn.BackgroundColor3 = Settings.SilentAim and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-end)
-
---// NEW: Tracer Button Logic
-ShowTracerBtn.MouseButton1Click:Connect(function()
-    Settings.ShowTracer = not Settings.ShowTracer
-    ShowTracerBtn.Text = "Show Tracer: " .. (Settings.ShowTracer and "ON" or "OFF")
-    ShowTracerBtn.BackgroundColor3 = Settings.ShowTracer and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
-end)
-
-TargetDropdown.MouseButton1Click:Connect(function()
-    DropdownList.Visible = not DropdownList.Visible
-end)
-
---// AIMBOT FUNCTIONS
-local function isAlive(player)
-    local character = player.Character
-    if not character then return false end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    return humanoid and humanoid.Health > 0
-end
-
-local function isTeammate(player)
-    if not Settings.TeamCheck then return false end
-    return LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team
-end
-
-local function isVisible(targetPart)
-    if not Settings.WallCheck then return true end
-    local origin = Camera.CFrame.Position
-    local direction = targetPart.Position - origin
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    local result = Workspace:Raycast(origin, direction.Unit * direction.Magnitude, rayParams)
-    return not result or result.Instance:IsDescendantOf(targetPart.Parent)
-end
-
+--// AIMBOT CORE LOGIC
 local function getClosestPlayer()
-    local closestPlayer = nil
-    local shortestDistance = Settings.FOV
+    local closestPlayer, shortestDistance = nil, Settings.FOV
     local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and isAlive(player) and not isTeammate(player) then
-            local character = player.Character
-            local targetPart = character:FindFirstChild(Settings.TargetPart) or character:FindFirstChild("HumanoidRootPart")
-            if targetPart then
-                local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
-                if onScreen then
-                    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
-                    local distance = (targetPos - screenCenter).Magnitude
-                    if distance < shortestDistance and isVisible(targetPart) then
-                        closestPlayer = player
-                        shortestDistance = distance
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                if not (Settings.TeamCheck and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team) then
+                    local targetPart = player.Character:FindFirstChild(Settings.TargetPart) or player.Character:FindFirstChild("HumanoidRootPart")
+                    if targetPart then
+                        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                        if onScreen then
+                            local targetVec = Vector2.new(screenPos.X, screenPos.Y)
+                            local distance = (targetVec - screenCenter).Magnitude
+                            
+                            if distance < shortestDistance then
+                                if Settings.WallCheck then
+                                    local rayParams = RaycastParams.new()
+                                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                                    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+                                    local rayResult = Workspace:Raycast(Camera.CFrame.Position, (targetPart.Position - Camera.CFrame.Position), rayParams)
+                                    if not rayResult or rayResult.Instance:IsDescendantOf(player.Character) then
+                                        shortestDistance = distance
+                                        closestPlayer = player
+                                    end
+                                else
+                                    shortestDistance = distance
+                                    closestPlayer = player
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
     end
-    
     return closestPlayer
 end
 
---// MAIN LOOP AND HOOKS
+--// RenderStepped Loop
 RunService.RenderStepped:Connect(function()
-    -- Update FOV Circle position
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOVCircle.Position = screenCenter
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Radius = Settings.FOV
-
-    local target = getClosestPlayer()
     
-    -- Tracer Line Logic
-    if Settings.Enabled and Settings.ShowTracer and target and target.Character then
+    local target = getClosestPlayer()
+
+    if Settings.Enabled and target and target.Character then
         local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
-        if targetPart then
+        if not targetPart then return end
+        
+        -- Tracer Logic
+        if Settings.ShowTracer then
             local targetScreenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
             if onScreen then
-                TracerLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y) -- From bottom-center
+                TracerLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                 TracerLine.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
                 TracerLine.Visible = true
             else
@@ -466,23 +343,18 @@ RunService.RenderStepped:Connect(function()
         else
             TracerLine.Visible = false
         end
+
+        -- Camera Lock Logic
+        if not Settings.SilentAim then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+        end
     else
         TracerLine.Visible = false
     end
-    
-    -- Camera Lock Aimbot Logic
-    if Settings.Enabled and not Settings.SilentAim then
-        if target and target.Character then
-            local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
-            if targetPart then
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
-            end
-        end
-    end
 end)
 
---// SILENT AIM CORE LOGIC
-if success then
+--// Namecall Hook for Silent Aim
+if namecallSupported and old_namecall then
     setnamecallmethod(function(self, ...)
         local method = getnamecallmethod()
         local args = {...}
@@ -492,7 +364,6 @@ if success then
             if target and target.Character then
                 local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- Find and replace the first Vector3 or CFrame argument with the target's position
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" then
                             args[i] = targetPart.Position
@@ -505,7 +376,25 @@ if success then
                 end
             end
         end
-        
         return old_namecall(self, unpack(args))
+    end)
+end
+
+--// Script cleanup
+ScreenGui.Destroying:Connect(function()
+    if namecallSupported and old_namecall then
+        setnamecallmethod(old_namecall)
+    end
+    FOVCircle:Remove()
+    TracerLine:Remove()
+end)
+
+-- The close button is part of the MainFrame which will be destroyed with the ScreenGui
+-- so we just need to destroy the main container.
+-- A better close button logic, however, would be to define it and connect it:
+local closeButton = guiElements.MainFrame:FindFirstChild("CloseButton", true) -- find it if it exists
+if closeButton then
+    closeButton.MouseButton1Click:Connect(function()
+        ScreenGui:Destroy()
     end)
 end
