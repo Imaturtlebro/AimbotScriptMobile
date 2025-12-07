@@ -1,17 +1,19 @@
 --[[
     Script: Aimbot (Camera Lock & Silent Aim) - Merged & Fixed
-    Version: 3.1
-    Author: Merged by AI, Fixed by Developer
+    Version: 3.2
+    Author: Merged by AI, Fixed & Updated by Developer
     
     Changes
-   
+    
+    - NEW: Added a "Smoothness" setting and GUI slider for the standard aimbot. This allows you to control
+           how quickly the camera locks onto targets, making it look more legitimate and less robotic.
+    - IMPROVED: The camera lock logic now uses frame-rate independent interpolation (Lerp) for consistent
+                aiming speed across all devices and frame rates.
+    - IMPROVED: The GUI has been resized and adjusted to accommodate the new smoothness slider.
     - FIXED: Silent Aim vector calculation. The script now sends a proper direction vector instead of a world position,
              resolving the issue where shots would go above the target's head.
     - FIXED: The "KillCheck" feature was logically broken and would disable the aimbot. It now correctly functions as a
              health check, ensuring the aimbot only targets live players. It is now enabled by default.
-    - IMPROVED: Added extensive, clear instructions within the silent aim hook on how to find and set the correct
-                remote event name, which is required to make silent aim function.
-    - IMPROVED: Overall code structure, readability, and reliability.
 ]]
 
 --// Services
@@ -32,8 +34,9 @@ local Settings = {
     SilentAim = false,
     ShowTracer = false,
     FOV = 80,
+    Smoothness = 10, -- NEW: Default smoothness value. Higher = faster/snappier aim. Lower = slower/smoother.
     TeamCheck = false,
-    KillCheck = true, -- FIXED: Enabled by default. This ensures the aimbot only targets living players.
+    KillCheck = true,
     WallCheck = false,
     TargetPart = "Head"
 }
@@ -93,7 +96,7 @@ local function CreateGUI()
     ToggleButton.Size = UDim2.new(0, 50, 0, 50)
     ToggleButton.Position = UDim2.new(0, 10, 0, 10)
     ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    ToggleButton.Image = "rbxassetid://132533655213092" -- A generic settings/gear icon
+    ToggleButton.Image = "rbxassetid://132533655213092"
     ToggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
     ToggleButton.ScaleType = Enum.ScaleType.Fit
     ToggleButton.ZIndex = 10
@@ -104,7 +107,7 @@ local function CreateGUI()
     -- Main Frame
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 180, 0, 350) -- Increased height for more buttons
+    MainFrame.Size = UDim2.new(0, 180, 0, 395) -- Increased height for smoothness slider
     MainFrame.Position = UDim2.new(0, 70, 0, 10)
     MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     MainFrame.Active = true
@@ -180,14 +183,14 @@ local function CreateGUI()
     Instance.new("UICorner", FOVSlider).CornerRadius = UDim.new(1, 0)
     guiElements.FOVSlider = FOVSlider
     
-    local SliderFill = Instance.new("Frame")
-    SliderFill.Name = "SliderFill"
-    SliderFill.Size = UDim2.new(Settings.FOV / 200, 0, 1, 0)
-    SliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    SliderFill.BorderSizePixel = 0
-    SliderFill.Parent = FOVSlider
-    Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(1, 0)
-    guiElements.SliderFill = SliderFill
+    local FOVSliderFill = Instance.new("Frame")
+    FOVSliderFill.Name = "SliderFill"
+    FOVSliderFill.Size = UDim2.new(Settings.FOV / 200, 0, 1, 0)
+    FOVSliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    FOVSliderFill.BorderSizePixel = 0
+    FOVSliderFill.Parent = FOVSlider
+    Instance.new("UICorner", FOVSliderFill).CornerRadius = UDim.new(1, 0)
+    guiElements.FOVSliderFill = FOVSliderFill
     
     -- Other Toggles
     guiElements.TeamCheckBtn = createToggle("TeamCheck", "Team Check", UDim2.new(0, 10, 0, 130))
@@ -196,11 +199,42 @@ local function CreateGUI()
     guiElements.SilentAimBtn = createToggle("SilentAim", "Silent Aim", UDim2.new(0, 10, 0, 220))
     guiElements.ShowTracerBtn = createToggle("ShowTracer", "Show Tracer", UDim2.new(0, 10, 0, 250))
 
+    -- NEW: Smoothness Slider
+    local SmoothnessLabel = Instance.new("TextLabel")
+    SmoothnessLabel.Name = "SmoothnessLabel"
+    SmoothnessLabel.Size = UDim2.new(1, -20, 0, 30)
+    SmoothnessLabel.Position = UDim2.new(0, 10, 0, 280)
+    SmoothnessLabel.BackgroundTransparency = 1
+    SmoothnessLabel.Text = "Smoothness: " .. Settings.Smoothness
+    SmoothnessLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    SmoothnessLabel.Font = Enum.Font.Gotham
+    SmoothnessLabel.TextScaled = true
+    SmoothnessLabel.Parent = MainFrame
+    guiElements.SmoothnessLabel = SmoothnessLabel
+
+    local SmoothnessSlider = Instance.new("Frame")
+    SmoothnessSlider.Name = "SmoothnessSlider"
+    SmoothnessSlider.Size = UDim2.new(1, -20, 0, 15)
+    SmoothnessSlider.Position = UDim2.new(0, 10, 0, 315)
+    SmoothnessSlider.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    SmoothnessSlider.Parent = MainFrame
+    Instance.new("UICorner", SmoothnessSlider).CornerRadius = UDim.new(1, 0)
+    guiElements.SmoothnessSlider = SmoothnessSlider
+    
+    local SmoothnessSliderFill = Instance.new("Frame")
+    SmoothnessSliderFill.Name = "SliderFill"
+    SmoothnessSliderFill.Size = UDim2.new(Settings.Smoothness / 30, 0, 1, 0) -- Max smoothness of 30
+    SmoothnessSliderFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    SmoothnessSliderFill.BorderSizePixel = 0
+    SmoothnessSliderFill.Parent = SmoothnessSlider
+    Instance.new("UICorner", SmoothnessSliderFill).CornerRadius = UDim.new(1, 0)
+    guiElements.SmoothnessSliderFill = SmoothnessSliderFill
+
     -- Target Part Dropdown
     local TargetContainer = Instance.new("Frame")
     TargetContainer.Name = "TargetContainer"
     TargetContainer.Size = UDim2.new(1, -20, 0, 36)
-    TargetContainer.Position = UDim2.new(0, 10, 0, 285)
+    TargetContainer.Position = UDim2.new(0, 10, 0, 340) -- Repositioned
     TargetContainer.BackgroundTransparency = 1
     TargetContainer.Parent = MainFrame
 
@@ -265,9 +299,7 @@ if not guiSuccess then
 end
 
 --// CONNECTIONS
--- Helper function for setting up toggle button logic
 local function setupToggleButton(button, settingKey, textPrefix)
-    -- Set initial state from Settings table
     local initialStatus = Settings[settingKey] and "ON" or "OFF"
     button.Text = textPrefix .. ": " .. initialStatus
     button.BackgroundColor3 = Settings[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(40, 40, 40)
@@ -294,68 +326,63 @@ setupToggleButton(guiElements.WallCheckBtn, "WallCheck", "Wall Check")
 setupToggleButton(guiElements.SilentAimBtn, "SilentAim", "Silent Aim")
 setupToggleButton(guiElements.ShowTracerBtn, "ShowTracer", "Show Tracer")
 
--- Show/Hide and Close Logic
 guiElements.ToggleButton.MouseButton1Click:Connect(function()
     guiElements.MainFrame.Visible = not guiElements.MainFrame.Visible
 end)
 guiElements.CloseButton.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
-
--- Dropdown Logic
 guiElements.TargetDropdown.MouseButton1Click:Connect(function()
     guiElements.DropdownList.Visible = not guiElements.DropdownList.Visible
 end)
 
 -- Slider Logic
-local draggingSlider = false
-local function updateSlider(input)
-    local sliderPos = guiElements.FOVSlider.AbsolutePosition.X
-    local sliderSize = guiElements.FOVSlider.AbsoluteSize.X
+local draggingFovSlider = false
+local draggingSmoothnessSlider = false
+
+local function updateSlider(sliderType, input)
+    local slider, sliderFill, label, settingKey, maxVal, textPrefix
+    if sliderType == "FOV" then
+        slider, sliderFill, label, settingKey, maxVal, textPrefix = guiElements.FOVSlider, guiElements.FOVSliderFill, guiElements.FOVLabel, "FOV", 200, "FOV: "
+    elseif sliderType == "Smoothness" then
+        slider, sliderFill, label, settingKey, maxVal, textPrefix = guiElements.SmoothnessSlider, guiElements.SmoothnessSliderFill, guiElements.SmoothnessLabel, "Smoothness", 30, "Smoothness: "
+    else
+        return
+    end
+
+    local sliderPos = slider.AbsolutePosition.X
+    local sliderSize = slider.AbsoluteSize.X
     if sliderSize == 0 then return end
     
     local mouseX = input.Position.X
     local percent = math.clamp((mouseX - sliderPos) / sliderSize, 0, 1)
     
-    Settings.FOV = math.max(1, math.floor(percent * 200)) -- Min FOV of 1
-    guiElements.FOVLabel.Text = "FOV: " .. Settings.FOV
-    FOVCircle.Radius = Settings.FOV
-    guiElements.SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    Settings[settingKey] = math.max(1, math.floor(percent * maxVal))
+    label.Text = textPrefix .. Settings[settingKey]
+    sliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    if sliderType == "FOV" then FOVCircle.Radius = Settings.FOV end
 end
 
-guiElements.FOVSlider.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        draggingSlider = true
-        updateSlider(input)
-    end
-end)
-guiElements.FOVSlider.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        draggingSlider = false
-    end
-end)
+guiElements.FOVSlider.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingFovSlider = true; updateSlider("FOV", input) end end)
+guiElements.FOVSlider.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingFovSlider = false end end)
+guiElements.SmoothnessSlider.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingSmoothnessSlider = true; updateSlider("Smoothness", input) end end)
+guiElements.SmoothnessSlider.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingSmoothnessSlider = false end end)
+
 UserInputService.InputChanged:Connect(function(input)
-    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        updateSlider(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        if draggingFovSlider then updateSlider("FOV", input) end
+        if draggingSmoothnessSlider then updateSlider("Smoothness", input) end
     end
 end)
 
 
 --// AIMBOT CORE LOGIC
 local function isAlive(player)
-    -- FIXED: This function now correctly checks the player's health if the setting is enabled.
     local character = player.Character
     if not character then return false end
-    
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return false end
-    
-    -- If KillCheck is enabled, we only target players with health greater than 0.
-    if Settings.KillCheck then
-        return humanoid.Health > 0
-    end
-    
-    -- If KillCheck is disabled, we consider any character with a humanoid a valid target.
+    if Settings.KillCheck then return humanoid.Health > 0 end
     return true
 end
 
@@ -373,7 +400,6 @@ local function isVisible(targetPart)
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     local result = Workspace:Raycast(origin, direction, rayParams)
-    
     return not result or result.Instance:IsDescendantOf(targetPart.Parent)
 end
 
@@ -401,7 +427,7 @@ end
 
 
 --// RENDER STEP (Main Loop)
-RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function(deltaTime)
     FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Radius = Settings.FOV
     
@@ -411,7 +437,6 @@ RunService.RenderStepped:Connect(function()
         local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
         if not targetPart then return end
         
-        -- Tracer Logic
         if Settings.ShowTracer then
             local targetScreenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
             if onScreen then
@@ -425,12 +450,18 @@ RunService.RenderStepped:Connect(function()
             TracerLine.Visible = false
         end
 
-        -- Camera Lock Logic (normal aimbot)
+        -- UPDATED: Camera Lock Logic with Smoothness
         if not Settings.SilentAim then
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+            local goalCFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+            
+            -- The alpha for Lerp is determined by the smoothness setting and deltaTime.
+            -- This makes the movement frame-rate independent.
+            -- A higher smoothness value results in a larger alpha, making the camera move faster.
+            local alpha = math.clamp(deltaTime * Settings.Smoothness, 0, 1)
+            
+            Camera.CFrame = Camera.CFrame:Lerp(goalCFrame, alpha)
         end
     else
-        -- If no target, hide tracer
         TracerLine.Visible = false
     end
 end)
@@ -442,43 +473,17 @@ if namecallSupported and old_namecall then
         local method = getnamecallmethod()
         local args = {...}
         
-        --[[
-            !!! CRITICAL STEP FOR SILENT AIM !!!
-            For silent aim to work, you MUST replace "YourFireRemoteNameHere" below
-            with the actual name of the remote event your weapon uses to fire.
-
-            HOW TO FIND THE REMOTE NAME:
-            1. Use a tool like RemoteSpy or SimpleSpy (included with many executors).
-            2. Shoot your weapon once.
-            3. Look at the spy tool's output for a remote event being fired to the server.
-            4. Common names are "Fire", "Damage", "UpdateMouse", "HandleInput", "Cast", "FireBullet".
-            5. Replace "YourFireRemoteNameHere" with the exact, case-sensitive name you found.
-            
-            EXAMPLE: If the remote is named "FireBullet", the line should be:
-            if Settings.Enabled and Settings.SilentAim and self.Name == "FireBullet" and target then
-        ]]
-        
         local target = getClosestPlayer()
 
         if Settings.Enabled and Settings.SilentAim and self.Name == "YourFireRemoteNameHere" and target then
             if target.Character then
                 local targetPart = target.Character:FindFirstChild(Settings.TargetPart) or target.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- This loop finds the first directional vector (Vector3) or CFrame in the remote's arguments and replaces it.
-                    -- For most games, this works fine. If it doesn't, you may need to target a specific argument like args[2] or args[3].
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" then
-                            --[[
-                                AIMING FIX: The old script sent `targetPart.Position`, which is an absolute world coordinate.
-                                Most gun systems expect a DIRECTION vector (e.g., where your mouse is pointing).
-                                By sending a world coordinate instead of a direction, the game interprets the shot angle
-                                incorrectly, causing it to aim high or miss entirely.
-                                This new line calculates the correct direction vector from your camera to the target.
-                            ]]
                             args[i] = targetPart.Position - Camera.CFrame.Position 
-                            break -- Stop after replacing the first vector to prevent breaking other arguments
+                            break
                         elseif typeof(v) == "CFrame" then
-                            -- This is generally correct, creating a CFrame that originates at the camera and looks at the target.
                             args[i] = CFrame.new(Camera.CFrame.Position, targetPart.Position)
                             break
                         end
@@ -487,7 +492,6 @@ if namecallSupported and old_namecall then
             end
         end
         
-        -- This passes the original or modified arguments to the game's function, ensuring everything else works.
         return old_namecall(self, unpack(args))
     end)
 end
@@ -495,9 +499,8 @@ end
 
 --// Script Cleanup
 ScreenGui.Destroying:Connect(function()
-    -- This is crucial to prevent errors when the script is destroyed or re-executed.
     if namecallSupported and old_namecall then
-        setnamecallmethod(old_namecall) -- Restore the original namecall function to prevent breaking game functions.
+        setnamecallmethod(old_namecall)
     end
     FOVCircle:Remove()
     TracerLine:Remove()
